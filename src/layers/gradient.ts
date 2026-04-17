@@ -1,11 +1,7 @@
-import {
-    Object3D,
-    Vector3,
-    BufferGeometry,
-    Float32BufferAttribute,
-    Line,
-    LineBasicMaterial,
-} from 'three'
+import { Object3D, Vector3 } from 'three'
+import { LineGeometry } from 'three/examples/jsm/lines/LineGeometry'
+import { LineMaterial } from 'three/examples/jsm/lines/LineMaterial'
+import { Line2 } from 'three/examples/jsm/lines/Line2'
 
 import Utils from '../utils'
 import {
@@ -259,8 +255,11 @@ export default class GradientLayerer {
 
         if (min === 0 && max === 0) max = 1
 
-        // Phase 2: Build Three.js geometry with per-vertex colors
-        const colorCache = new Map<number, { r: number; g: number; b: number }>()
+        // Phase 2: Build color lookup
+        const colorCache = new Map<
+            number,
+            { r: number; g: number; b: number }
+        >()
         const colorForValue = (
             v: number
         ): { r: number; g: number; b: number } => {
@@ -275,13 +274,13 @@ export default class GradientLayerer {
             return rgb
         }
 
-        const hoverSegments: any[] = []
-
+        // Phase 3: Build per-segment Line2 meshes
+        // Uses the same Line2/LineMaterial/LineGeometry approach as
+        // vector.ts thickLine, with one Line2 per segment so each
+        // segment gets its own solid color and mouse event support.
         for (const pts of allPaths) {
-            const positions: number[] = []
-            const colors: number[] = []
-            let firstPos: Vector3 | null = null
-
+            // Convert all vertices to 3D positions
+            const worldPositions: Vector3[] = []
             for (let i = 0; i < pts.length; i++) {
                 const p = pts[i]
                 const v = this.p.p.projection.lonLatToVector3(
@@ -289,100 +288,102 @@ export default class GradientLayerer {
                     p.lat,
                     p.elev * this.p.p.options.exaggeration
                 )
-
-                if (i === 0) {
-                    firstPos = new Vector3(v.x, v.y, v.z)
-                }
-
-                positions.push(
-                    v.x - firstPos!.x,
-                    v.y - firstPos!.y,
-                    v.z - firstPos!.z
-                )
-
-                const rgb = colorForValue(p.value)
-                colors.push(rgb.r / 255, rgb.g / 255, rgb.b / 255)
+                worldPositions.push(new Vector3(v.x, v.y, v.z))
             }
 
-            if (positions.length >= 6 && firstPos) {
-                const geometry = new BufferGeometry()
-                geometry.setAttribute(
-                    'position',
-                    new Float32BufferAttribute(positions, 3)
-                )
-                geometry.setAttribute(
-                    'color',
-                    new Float32BufferAttribute(colors, 3)
-                )
+            // Use firstPos centering to avoid floating-point jitter
+            const firstPos = worldPositions[0].clone()
 
-                const material = new LineBasicMaterial({
-                    linewidth: weight,
-                    vertexColors: true,
-                    transparent: true,
-                    depthTest: false,
-                    opacity:
-                        layerObj.opacity != null ? layerObj.opacity : 1,
+            for (let i = 0; i < pts.length - 1; i++) {
+                const p0 = worldPositions[i]
+                const p1 = worldPositions[i + 1]
+
+                // Segment positions relative to firstPos
+                const positions = [
+                    p0.x - firstPos.x,
+                    p0.y - firstPos.y,
+                    p0.z - firstPos.z,
+                    p1.x - firstPos.x,
+                    p1.y - firstPos.y,
+                    p1.z - firstPos.z,
+                ]
+
+                // Average color of the two endpoints
+                const rgb0 = colorForValue(pts[i].value)
+                const rgb1 = colorForValue(pts[i + 1].value)
+                const avgR = Math.round((rgb0.r + rgb1.r) / 2)
+                const avgG = Math.round((rgb0.g + rgb1.g) / 2)
+                const avgB = Math.round((rgb0.b + rgb1.b) / 2)
+                const segColor = (avgR << 16) | (avgG << 8) | avgB
+
+                const geometry = new LineGeometry()
+                geometry.setPositions(positions)
+
+                const material = new LineMaterial({
+                    color: segColor,
+                    linewidth: 0.0005 * weight,
                 })
 
-                const mesh = new Line(geometry, material)
+                const mesh = new Line2(geometry, material)
+                mesh.computeLineDistances()
                 mesh.position.set(
                     firstPos.x,
                     firstPos.y,
                     firstPos.z
                 )
+                mesh.scale.set(1, 1, 1)
+
+                // Properties for the event system (mouse hover/click)
+                // @ts-ignore
+                mesh.layerName = layerObj.name
+                // @ts-ignore
+                mesh.strokeColor = segColor
+                // @ts-ignore
+                mesh.feature = {
+                    type: 'Feature',
+                    properties: Object.assign({}, pts[i].props, {
+                        _gradientSegmentIndex: i,
+                        _gradientValue: pts[i].value,
+                        _gradientValueEnd: pts[i + 1].value,
+                    }),
+                    geometry: {
+                        type: 'LineString',
+                        coordinates: [
+                            [pts[i].lng, pts[i].lat, pts[i].elev],
+                            [
+                                pts[i + 1].lng,
+                                pts[i + 1].lat,
+                                pts[i + 1].elev,
+                            ],
+                        ],
+                    },
+                    _highlighted: false,
+                    _active: false,
+                }
+
+                const defaultColor = segColor
+                // @ts-ignore
+                mesh.restyle = () => {
+                    // @ts-ignore
+                    const isHighlighted = mesh.feature._highlighted
+                    // @ts-ignore
+                    const isActive = mesh.feature._active
+                    const c =
+                        isHighlighted || isActive
+                            ? 0xffffff
+                            : defaultColor
+                    mesh.material = new LineMaterial({
+                        color: c,
+                        linewidth:
+                            0.0005 *
+                            weight *
+                            (isHighlighted || isActive ? 2 : 1),
+                    })
+                }
 
                 gradientGroup.add(mesh)
             }
-
-            // Build hover segment data
-            for (let i = 0; i < pts.length - 1; i++) {
-                const p1 = pts[i]
-                const p2 = pts[i + 1]
-                hoverSegments.push({
-                    lng1: p1.lng,
-                    lat1: p1.lat,
-                    elev1: p1.elev || 0,
-                    lng2: p2.lng,
-                    lat2: p2.lat,
-                    elev2: p2.elev || 0,
-                })
-            }
         }
-
-        // Build spatial grid for hover
-        const gridRes = 0.01
-        const segmentGrid: Record<string, number[]> = {}
-        for (let idx = 0; idx < hoverSegments.length; idx++) {
-            const seg = hoverSegments[idx]
-            const gx1 = Math.floor(seg.lng1 / gridRes)
-            const gy1 = Math.floor(seg.lat1 / gridRes)
-            const gx2 = Math.floor(seg.lng2 / gridRes)
-            const gy2 = Math.floor(seg.lat2 / gridRes)
-            const span = Math.max(
-                Math.abs(gx2 - gx1),
-                Math.abs(gy2 - gy1)
-            )
-            const steps = Math.min(12, Math.max(1, Math.ceil(span / 2)))
-            const seenCells = new Set<string>()
-            for (let s = 0; s <= steps; s++) {
-                const t = s / steps
-                const gx = Math.floor(
-                    (seg.lng1 + t * (seg.lng2 - seg.lng1)) / gridRes
-                )
-                const gy = Math.floor(
-                    (seg.lat1 + t * (seg.lat2 - seg.lat1)) / gridRes
-                )
-                const key = `${gx},${gy}`
-                if (seenCells.has(key)) continue
-                seenCells.add(key)
-                if (!segmentGrid[key]) segmentGrid[key] = []
-                segmentGrid[key].push(idx)
-            }
-        }
-
-        layerObj.hoverSegments = hoverSegments
-        layerObj.segmentGrid = segmentGrid
-        layerObj.gridRes = gridRes
 
         if (layerObj.on == false) {
             gradientGroup.visible = false
