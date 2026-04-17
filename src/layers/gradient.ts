@@ -305,12 +305,18 @@ export default class GradientLayerer {
                 geometry.setPositions(positions)
                 geometry.setColors(colors)
 
+                const container = this.p.p._.container
                 const material = new LineMaterial({
                     linewidth: 0.0005 * weight,
                     vertexColors: true,
                     transparent: true,
-                    opacity: layerObj.opacity != null ? layerObj.opacity : 1,
+                    opacity:
+                        layerObj.opacity != null ? layerObj.opacity : 1,
                 })
+                material.resolution.set(
+                    container.clientWidth || window.innerWidth,
+                    container.clientHeight || window.innerHeight
+                )
 
                 const mesh = new Line2(geometry, material)
                 mesh.computeLineDistances()
