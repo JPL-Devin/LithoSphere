@@ -314,6 +314,10 @@ export default class GradientLayerer {
                     opacity:
                         layerObj.opacity != null ? layerObj.opacity : 1,
                 })
+                // LineMaterial is a ShaderMaterial, so vertexColors:true
+                // does not automatically add the USE_COLOR define needed
+                // by the vertex shader to read instanceColorStart/End.
+                material.defines.USE_COLOR = ''
                 material.resolution.set(
                     container.clientWidth || window.innerWidth,
                     container.clientHeight || window.innerHeight
