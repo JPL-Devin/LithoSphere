@@ -310,6 +310,7 @@ export default class GradientLayerer {
                     linewidth: 0.0005 * weight,
                     vertexColors: true,
                     transparent: true,
+                    depthTest: false,
                     opacity:
                         layerObj.opacity != null ? layerObj.opacity : 1,
                 })
