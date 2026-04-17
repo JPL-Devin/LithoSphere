@@ -1,7 +1,11 @@
-import { Object3D, Vector3 } from 'three'
-import { LineGeometry } from 'three/examples/jsm/lines/LineGeometry'
-import { LineMaterial } from 'three/examples/jsm/lines/LineMaterial'
-import { Line2 } from 'three/examples/jsm/lines/Line2'
+import {
+    Object3D,
+    Vector3,
+    BufferGeometry,
+    Float32BufferAttribute,
+    Line,
+    LineBasicMaterial,
+} from 'three'
 
 import Utils from '../utils'
 import {
@@ -301,36 +305,31 @@ export default class GradientLayerer {
             }
 
             if (positions.length >= 6 && firstPos) {
-                const geometry = new LineGeometry()
-                geometry.setPositions(positions)
-                geometry.setColors(colors)
+                const geometry = new BufferGeometry()
+                geometry.setAttribute(
+                    'position',
+                    new Float32BufferAttribute(positions, 3)
+                )
+                geometry.setAttribute(
+                    'color',
+                    new Float32BufferAttribute(colors, 3)
+                )
 
-                const container = this.p.p._.container
-                const material = new LineMaterial({
-                    linewidth: 0.0005 * weight,
+                const material = new LineBasicMaterial({
+                    linewidth: weight,
                     vertexColors: true,
                     transparent: true,
                     depthTest: false,
                     opacity:
                         layerObj.opacity != null ? layerObj.opacity : 1,
                 })
-                // LineMaterial is a ShaderMaterial, so vertexColors:true
-                // does not automatically add the USE_COLOR define needed
-                // by the vertex shader to read instanceColorStart/End.
-                material.defines.USE_COLOR = ''
-                material.resolution.set(
-                    container.clientWidth || window.innerWidth,
-                    container.clientHeight || window.innerHeight
-                )
 
-                const mesh = new Line2(geometry, material)
-                mesh.computeLineDistances()
+                const mesh = new Line(geometry, material)
                 mesh.position.set(
                     firstPos.x,
                     firstPos.y,
                     firstPos.z
                 )
-                mesh.scale.set(1, 1, 1)
 
                 gradientGroup.add(mesh)
             }
