@@ -378,12 +378,25 @@ export default class GradientLayerer {
 
             // Add debug points at each data vertex if enabled
             if (showDebugPoints) {
+                // Compute appropriate sphere radius from segment spacing
+                let debugRadius = 3.0
+                if (worldPositions.length >= 2) {
+                    const d = worldPositions[0].distanceTo(
+                        worldPositions[1]
+                    )
+                    // Radius = 30% of segment length, clamped
+                    debugRadius = Math.max(0.5, Math.min(d * 0.3, 10))
+                }
                 for (let i = 0; i < pts.length; i++) {
                     const wp = worldPositions[i]
                     const rgb = colorForValue(pts[i].value)
                     const pointColor =
                         (rgb.r << 16) | (rgb.g << 8) | rgb.b
-                    const sphereGeo = new SphereGeometry(0.15, 8, 6)
+                    const sphereGeo = new SphereGeometry(
+                        debugRadius,
+                        12,
+                        8
+                    )
                     const sphereMat = new MeshBasicMaterial({
                         color: pointColor,
                         depthTest: false,
@@ -391,6 +404,7 @@ export default class GradientLayerer {
                     const sphere = new Mesh(sphereGeo, sphereMat)
                     sphere.position.set(wp.x, wp.y, wp.z)
                     sphere.renderOrder = 999
+                    sphere.frustumCulled = false
                     gradientGroup.add(sphere)
                 }
             }
