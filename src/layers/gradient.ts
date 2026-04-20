@@ -477,18 +477,18 @@ export default class GradientLayerer {
                     const isHighlighted = meshA.feature._highlighted
                     // @ts-ignore
                     const isActive = meshA.feature._active
-                    const c =
-                        isHighlighted || isActive
-                            ? 0xffffff
-                            : defaultColorA
-                    const mat = new LineMaterial({
+                    let c: any = defaultColorA
+                    if (isActive) {
+                        c = this.p.p.options.activeColor || 'red'
+                    } else if (isHighlighted) {
+                        c = this.p.p.options.highlightColor || 'yellow'
+                    }
+                    meshA.material = new LineMaterial({
                         color: c,
-                        linewidth:
-                            0.0005 *
-                            weight *
-                            (isHighlighted || isActive ? 2 : 1),
+                        linewidth: 0.0005 * weight,
                     })
-                    meshA.material = mat
+                    // @ts-ignore
+                    meshA.strokeColor = c
                 }
 
                 gradientGroup.add(meshA)
@@ -558,18 +558,18 @@ export default class GradientLayerer {
                     const isHighlighted = meshB.feature._highlighted
                     // @ts-ignore
                     const isActive = meshB.feature._active
-                    const c =
-                        isHighlighted || isActive
-                            ? 0xffffff
-                            : defaultColorB
-                    const mat = new LineMaterial({
+                    let c: any = defaultColorB
+                    if (isActive) {
+                        c = this.p.p.options.activeColor || 'red'
+                    } else if (isHighlighted) {
+                        c = this.p.p.options.highlightColor || 'yellow'
+                    }
+                    meshB.material = new LineMaterial({
                         color: c,
-                        linewidth:
-                            0.0005 *
-                            weight *
-                            (isHighlighted || isActive ? 2 : 1),
+                        linewidth: 0.0005 * weight,
                     })
-                    meshB.material = mat
+                    // @ts-ignore
+                    meshB.strokeColor = c
                 }
 
                 gradientGroup.add(meshB)
