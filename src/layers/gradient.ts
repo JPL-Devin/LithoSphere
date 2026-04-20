@@ -56,7 +56,7 @@ export default class GradientLayerer {
                 // Create a placeholder group immediately so the layer is
                 // registered synchronously, then build meshes async.
                 const gradientGroup = new Object3D()
-                this.p.p.planet.add(gradientGroup)
+                this.p.p.frontGroup.add(gradientGroup)
                 layerObj.meshes = gradientGroup
 
                 if (layerObj.on == false) {
@@ -148,7 +148,7 @@ export default class GradientLayerer {
 
         for (let i = 0; i < this.p.gradient.length; i++) {
             if (this.p.gradient[i].name === name) {
-                this.p.p.planet.remove(this.p.gradient[i].meshes)
+                this.p.p.frontGroup.remove(this.p.gradient[i].meshes)
                 this.p.gradient.splice(i, 1)
                 return true
             }
@@ -433,8 +433,6 @@ export default class GradientLayerer {
                     color: color0,
                     linewidth: 0.0005 * weight,
                 })
-                materialA.depthTest = false
-                materialA.depthWrite = false
 
                 const meshA = new Line2(geometryA, materialA)
                 meshA.computeLineDistances()
@@ -444,7 +442,6 @@ export default class GradientLayerer {
                     firstPos.z
                 )
                 meshA.scale.set(1, 1, 1)
-                meshA.renderOrder = 998
 
                 // @ts-ignore
                 meshA.layerName = layerObj.name
@@ -491,8 +488,6 @@ export default class GradientLayerer {
                             weight *
                             (isHighlighted || isActive ? 2 : 1),
                     })
-                    mat.depthTest = false
-                    mat.depthWrite = false
                     meshA.material = mat
                 }
 
@@ -515,8 +510,6 @@ export default class GradientLayerer {
                     color: color1,
                     linewidth: 0.0005 * weight,
                 })
-                materialB.depthTest = false
-                materialB.depthWrite = false
 
                 const meshB = new Line2(geometryB, materialB)
                 meshB.computeLineDistances()
@@ -526,7 +519,6 @@ export default class GradientLayerer {
                     firstPos.z
                 )
                 meshB.scale.set(1, 1, 1)
-                meshB.renderOrder = 998
 
                 // @ts-ignore
                 meshB.layerName = layerObj.name
@@ -577,8 +569,6 @@ export default class GradientLayerer {
                             weight *
                             (isHighlighted || isActive ? 2 : 1),
                     })
-                    mat.depthTest = false
-                    mat.depthWrite = false
                     meshB.material = mat
                 }
 
