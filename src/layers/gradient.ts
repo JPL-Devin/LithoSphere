@@ -1,7 +1,6 @@
 import {
     Object3D,
     Vector3,
-    Vector2,
     SphereGeometry,
     MeshBasicMaterial,
     Mesh,
@@ -155,21 +154,6 @@ export default class GradientLayerer {
             }
         }
         return false
-    }
-
-    /**
-     * Get the container resolution for LineMaterial.
-     * Falls back to (1, 1) if the container is not available.
-     */
-    private getResolution = (): Vector2 => {
-        const container = this.p.p._.container
-        if (container) {
-            return new Vector2(
-                container.clientWidth || 1,
-                container.clientHeight || 1
-            )
-        }
-        return new Vector2(1, 1)
     }
 
     /**
@@ -357,7 +341,6 @@ export default class GradientLayerer {
         // colored region (which extends from mid(P[i-1],P[i]) to
         // mid(P[i],P[i+1])), with midpoints as color-transition boundaries.
 
-        const resolution = this.getResolution()
         let iterCount = 0
 
         for (const pts of allPaths) {
@@ -451,7 +434,6 @@ export default class GradientLayerer {
                     linewidth: 0.0005 * weight,
                     depthTest: false,
                 })
-                materialA.resolution.copy(resolution)
 
                 const meshA = new Line2(geometryA, materialA)
                 meshA.computeLineDistances()
@@ -509,7 +491,6 @@ export default class GradientLayerer {
                             (isHighlighted || isActive ? 2 : 1),
                         depthTest: false,
                     })
-                    mat.resolution.copy(this.getResolution())
                     meshA.material = mat
                 }
 
@@ -533,7 +514,6 @@ export default class GradientLayerer {
                     linewidth: 0.0005 * weight,
                     depthTest: false,
                 })
-                materialB.resolution.copy(resolution)
 
                 const meshB = new Line2(geometryB, materialB)
                 meshB.computeLineDistances()
@@ -595,7 +575,6 @@ export default class GradientLayerer {
                             (isHighlighted || isActive ? 2 : 1),
                         depthTest: false,
                     })
-                    mat.resolution.copy(this.getResolution())
                     meshB.material = mat
                 }
 
