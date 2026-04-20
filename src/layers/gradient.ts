@@ -56,7 +56,7 @@ export default class GradientLayerer {
                 // Create a placeholder group immediately so the layer is
                 // registered synchronously, then build meshes async.
                 const gradientGroup = new Object3D()
-                this.p.p.frontGroup.add(gradientGroup)
+                this.p.p.planet.add(gradientGroup)
                 layerObj.meshes = gradientGroup
 
                 if (layerObj.on == false) {
@@ -148,7 +148,7 @@ export default class GradientLayerer {
 
         for (let i = 0; i < this.p.gradient.length; i++) {
             if (this.p.gradient[i].name === name) {
-                this.p.p.frontGroup.remove(this.p.gradient[i].meshes)
+                this.p.p.planet.remove(this.p.gradient[i].meshes)
                 this.p.gradient.splice(i, 1)
                 return true
             }
