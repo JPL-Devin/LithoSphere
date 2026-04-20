@@ -274,10 +274,17 @@ export default class GradientLayerer {
             return rgb
         }
 
-        // Phase 3: Build per-segment Line2 meshes
-        // Uses the same Line2/LineMaterial/LineGeometry approach as
-        // vector.ts thickLine, with one Line2 per segment so each
-        // segment gets its own solid color and mouse event support.
+        // Phase 3: Build per-segment Line2 meshes using two-sub-segment
+        // per vertex coloring strategy (matches MMGIS PR #31 approach).
+        //
+        // Each original segment P[i] → P[i+1] is split at its midpoint M
+        // into two sub-segments:
+        //   Sub-segment A: P[i] → M   — colored with P[i]'s value
+        //   Sub-segment B: M → P[i+1] — colored with P[i+1]'s value
+        //
+        // This ensures each data point P[i] sits at the CENTER of its
+        // colored region (which extends from mid(P[i-1],P[i]) to
+        // mid(P[i],P[i+1])), with midpoints as color-transition boundaries.
         for (const pts of allPaths) {
             // Convert all vertices to 3D positions
             const worldPositions: Vector3[] = []
@@ -298,58 +305,133 @@ export default class GradientLayerer {
                 const p0 = worldPositions[i]
                 const p1 = worldPositions[i + 1]
 
-                // Segment positions relative to firstPos
-                const positions = [
+                // Compute midpoint between P[i] and P[i+1]
+                const mid = new Vector3(
+                    (p0.x + p1.x) / 2,
+                    (p0.y + p1.y) / 2,
+                    (p0.z + p1.z) / 2
+                )
+
+                const rgb0 = colorForValue(pts[i].value)
+                const rgb1 = colorForValue(pts[i + 1].value)
+                const color0 = (rgb0.r << 16) | (rgb0.g << 8) | rgb0.b
+                const color1 = (rgb1.r << 16) | (rgb1.g << 8) | rgb1.b
+
+                // Sub-segment A: P[i] → midpoint, colored with P[i]'s value
+                const positionsA = [
                     p0.x - firstPos.x,
                     p0.y - firstPos.y,
                     p0.z - firstPos.z,
-                    p1.x - firstPos.x,
-                    p1.y - firstPos.y,
-                    p1.z - firstPos.z,
+                    mid.x - firstPos.x,
+                    mid.y - firstPos.y,
+                    mid.z - firstPos.z,
                 ]
 
-                // Average color of the two endpoints
-                const rgb0 = colorForValue(pts[i].value)
-                const rgb1 = colorForValue(pts[i + 1].value)
-                const avgR = Math.round((rgb0.r + rgb1.r) / 2)
-                const avgG = Math.round((rgb0.g + rgb1.g) / 2)
-                const avgB = Math.round((rgb0.b + rgb1.b) / 2)
-                const segColor = (avgR << 16) | (avgG << 8) | avgB
+                const geometryA = new LineGeometry()
+                geometryA.setPositions(positionsA)
 
-                const geometry = new LineGeometry()
-                geometry.setPositions(positions)
-
-                const material = new LineMaterial({
-                    color: segColor,
+                const materialA = new LineMaterial({
+                    color: color0,
                     linewidth: 0.0005 * weight,
                 })
 
-                const mesh = new Line2(geometry, material)
-                mesh.computeLineDistances()
-                mesh.position.set(
-                    firstPos.x,
-                    firstPos.y,
-                    firstPos.z
-                )
-                mesh.scale.set(1, 1, 1)
+                const meshA = new Line2(geometryA, materialA)
+                meshA.computeLineDistances()
+                meshA.position.set(firstPos.x, firstPos.y, firstPos.z)
+                meshA.scale.set(1, 1, 1)
 
-                // Properties for the event system (mouse hover/click)
                 // @ts-ignore
-                mesh.layerName = layerObj.name
+                meshA.layerName = layerObj.name
                 // @ts-ignore
-                mesh.strokeColor = segColor
+                meshA.strokeColor = color0
                 // @ts-ignore
-                mesh.feature = {
+                meshA.feature = {
                     type: 'Feature',
                     properties: Object.assign({}, pts[i].props, {
                         _gradientSegmentIndex: i,
+                        _gradientSubSegment: 'A',
                         _gradientValue: pts[i].value,
-                        _gradientValueEnd: pts[i + 1].value,
                     }),
                     geometry: {
                         type: 'LineString',
                         coordinates: [
                             [pts[i].lng, pts[i].lat, pts[i].elev],
+                            [
+                                (pts[i].lng + pts[i + 1].lng) / 2,
+                                (pts[i].lat + pts[i + 1].lat) / 2,
+                                (pts[i].elev + pts[i + 1].elev) / 2,
+                            ],
+                        ],
+                    },
+                    _highlighted: false,
+                    _active: false,
+                }
+
+                const defaultColorA = color0
+                // @ts-ignore
+                meshA.restyle = () => {
+                    // @ts-ignore
+                    const isHighlighted = meshA.feature._highlighted
+                    // @ts-ignore
+                    const isActive = meshA.feature._active
+                    const c =
+                        isHighlighted || isActive
+                            ? 0xffffff
+                            : defaultColorA
+                    meshA.material = new LineMaterial({
+                        color: c,
+                        linewidth:
+                            0.0005 *
+                            weight *
+                            (isHighlighted || isActive ? 2 : 1),
+                    })
+                }
+
+                gradientGroup.add(meshA)
+
+                // Sub-segment B: midpoint → P[i+1], colored with P[i+1]'s value
+                const positionsB = [
+                    mid.x - firstPos.x,
+                    mid.y - firstPos.y,
+                    mid.z - firstPos.z,
+                    p1.x - firstPos.x,
+                    p1.y - firstPos.y,
+                    p1.z - firstPos.z,
+                ]
+
+                const geometryB = new LineGeometry()
+                geometryB.setPositions(positionsB)
+
+                const materialB = new LineMaterial({
+                    color: color1,
+                    linewidth: 0.0005 * weight,
+                })
+
+                const meshB = new Line2(geometryB, materialB)
+                meshB.computeLineDistances()
+                meshB.position.set(firstPos.x, firstPos.y, firstPos.z)
+                meshB.scale.set(1, 1, 1)
+
+                // @ts-ignore
+                meshB.layerName = layerObj.name
+                // @ts-ignore
+                meshB.strokeColor = color1
+                // @ts-ignore
+                meshB.feature = {
+                    type: 'Feature',
+                    properties: Object.assign({}, pts[i + 1].props, {
+                        _gradientSegmentIndex: i,
+                        _gradientSubSegment: 'B',
+                        _gradientValue: pts[i + 1].value,
+                    }),
+                    geometry: {
+                        type: 'LineString',
+                        coordinates: [
+                            [
+                                (pts[i].lng + pts[i + 1].lng) / 2,
+                                (pts[i].lat + pts[i + 1].lat) / 2,
+                                (pts[i].elev + pts[i + 1].elev) / 2,
+                            ],
                             [
                                 pts[i + 1].lng,
                                 pts[i + 1].lat,
@@ -361,18 +443,18 @@ export default class GradientLayerer {
                     _active: false,
                 }
 
-                const defaultColor = segColor
+                const defaultColorB = color1
                 // @ts-ignore
-                mesh.restyle = () => {
+                meshB.restyle = () => {
                     // @ts-ignore
-                    const isHighlighted = mesh.feature._highlighted
+                    const isHighlighted = meshB.feature._highlighted
                     // @ts-ignore
-                    const isActive = mesh.feature._active
+                    const isActive = meshB.feature._active
                     const c =
                         isHighlighted || isActive
                             ? 0xffffff
-                            : defaultColor
-                    mesh.material = new LineMaterial({
+                            : defaultColorB
+                    meshB.material = new LineMaterial({
                         color: c,
                         linewidth:
                             0.0005 *
@@ -381,7 +463,7 @@ export default class GradientLayerer {
                     })
                 }
 
-                gradientGroup.add(mesh)
+                gradientGroup.add(meshB)
             }
         }
 
