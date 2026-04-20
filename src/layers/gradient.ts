@@ -432,8 +432,9 @@ export default class GradientLayerer {
                 const materialA = new LineMaterial({
                     color: color0,
                     linewidth: 0.0005 * weight,
-                    depthTest: false,
                 })
+                materialA.depthTest = false
+                materialA.depthWrite = false
 
                 const meshA = new Line2(geometryA, materialA)
                 meshA.computeLineDistances()
@@ -489,8 +490,9 @@ export default class GradientLayerer {
                             0.0005 *
                             weight *
                             (isHighlighted || isActive ? 2 : 1),
-                        depthTest: false,
                     })
+                    mat.depthTest = false
+                    mat.depthWrite = false
                     meshA.material = mat
                 }
 
@@ -512,8 +514,9 @@ export default class GradientLayerer {
                 const materialB = new LineMaterial({
                     color: color1,
                     linewidth: 0.0005 * weight,
-                    depthTest: false,
                 })
+                materialB.depthTest = false
+                materialB.depthWrite = false
 
                 const meshB = new Line2(geometryB, materialB)
                 meshB.computeLineDistances()
@@ -573,8 +576,9 @@ export default class GradientLayerer {
                             0.0005 *
                             weight *
                             (isHighlighted || isActive ? 2 : 1),
-                        depthTest: false,
                     })
+                    mat.depthTest = false
+                    mat.depthWrite = false
                     meshB.material = mat
                 }
 
