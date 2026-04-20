@@ -1,4 +1,11 @@
-import { Object3D, Vector3 } from 'three'
+import {
+    Object3D,
+    Vector3,
+    Vector2,
+    SphereGeometry,
+    MeshBasicMaterial,
+    Mesh,
+} from 'three'
 import { LineGeometry } from 'three/examples/jsm/lines/LineGeometry'
 import { LineMaterial } from 'three/examples/jsm/lines/LineMaterial'
 import { Line2 } from 'three/examples/jsm/lines/Line2'
@@ -47,15 +54,23 @@ export default class GradientLayerer {
                 }
             }
             if (!alreadyExists) {
-                const meshes = this.generateGradientLines(layerObj)
-                if (meshes) {
-                    this.p.p.planet.add(meshes)
-                    layerObj.meshes = meshes
-                    this.p.gradient.push(layerObj)
-                    this.p.gradient.sort(
-                        (a: any, b: any) => b.order - a.order
-                    )
+                // Create a placeholder group immediately so the layer is
+                // registered synchronously, then build meshes async.
+                const gradientGroup = new Object3D()
+                this.p.p.planet.add(gradientGroup)
+                layerObj.meshes = gradientGroup
+
+                if (layerObj.on == false) {
+                    gradientGroup.visible = false
                 }
+
+                this.p.gradient.push(layerObj)
+                this.p.gradient.sort(
+                    (a: any, b: any) => b.order - a.order
+                )
+
+                // Build geometry asynchronously with frame-budgeted yielding
+                this.generateGradientLinesAsync(layerObj, gradientGroup)
             }
             this.p.p._.events._attenuate()
             if (typeof callback === 'function') callback()
@@ -142,8 +157,54 @@ export default class GradientLayerer {
         return false
     }
 
-    private generateGradientLines = (layerObj: any): Object3D | undefined => {
-        const gradientGroup = new Object3D()
+    /**
+     * Get the container resolution for LineMaterial.
+     * Falls back to (1, 1) if the container is not available.
+     */
+    private getResolution = (): Vector2 => {
+        const container = this.p.p._.container
+        if (container) {
+            return new Vector2(
+                container.clientWidth || 1,
+                container.clientHeight || 1
+            )
+        }
+        return new Vector2(1, 1)
+    }
+
+    /**
+     * Async builder for gradient polyline geometry.
+     * Uses a per-frame time budget (FRAME_BUDGET_MS) so the UI is never
+     * blocked regardless of dataset size. Checks performance.now() every
+     * CHECK_INTERVAL iterations and yields via requestAnimationFrame
+     * whenever the budget is exceeded.
+     */
+    private generateGradientLinesAsync = async (
+        layerObj: any,
+        gradientGroup: Object3D
+    ): Promise<void> => {
+        const FRAME_BUDGET_MS = 10
+        const CHECK_INTERVAL = 50
+        let frameDeadline = performance.now() + FRAME_BUDGET_MS
+
+        const yieldIfNeeded = (): Promise<void> => {
+            if (performance.now() < frameDeadline) return Promise.resolve()
+            return new Promise((resolve) => {
+                requestAnimationFrame(() => {
+                    frameDeadline = performance.now() + FRAME_BUDGET_MS
+                    resolve()
+                })
+            })
+        }
+
+        // Abort check — if the layer was removed during async build
+        const isStale = (): boolean => {
+            return !this.p.gradient.some(
+                (l: any) =>
+                    l.name === layerObj.name &&
+                    l.meshes === gradientGroup
+            )
+        }
 
         if (layerObj.geojson == null) {
             console.warn(
@@ -163,6 +224,7 @@ export default class GradientLayerer {
         const colorWithProp = gradientSettings.colorWithProp
         const colorStops = buildColorStops(gradientSettings.colorRamp)
         const weight = gradientSettings.weight || 4
+        const showDebugPoints = gradientSettings.debugPoints === true
 
         // Phase 1: Collect all vertices with property values
         const allPaths: GradientVertex[][] = []
@@ -179,6 +241,10 @@ export default class GradientLayerer {
         if (gradientSettings.connectAllPoints) {
             const points: GradientVertex[] = []
             for (let fi = 0; fi < features.length; fi++) {
+                if (fi % CHECK_INTERVAL === 0) {
+                    await yieldIfNeeded()
+                    if (isStale()) return
+                }
                 const feature = features[fi]
                 if (
                     feature.geometry.type.toLowerCase() === 'point'
@@ -203,6 +269,10 @@ export default class GradientLayerer {
             if (points.length >= 2) allPaths.push(points)
         } else {
             for (let fi = 0; fi < features.length; fi++) {
+                if (fi % CHECK_INTERVAL === 0) {
+                    await yieldIfNeeded()
+                    if (isStale()) return
+                }
                 const feature = features[fi]
                 const paths: GradientVertex[][] = []
                 let path: GradientVertex[] = []
@@ -254,6 +324,7 @@ export default class GradientLayerer {
         }
 
         if (min === 0 && max === 0) max = 1
+        if (isStale()) return
 
         // Phase 2: Build color lookup
         const colorCache = new Map<
@@ -285,6 +356,10 @@ export default class GradientLayerer {
         // This ensures each data point P[i] sits at the CENTER of its
         // colored region (which extends from mid(P[i-1],P[i]) to
         // mid(P[i],P[i+1])), with midpoints as color-transition boundaries.
+
+        const resolution = this.getResolution()
+        let iterCount = 0
+
         for (const pts of allPaths) {
             // Convert all vertices to 3D positions
             const worldPositions: Vector3[] = []
@@ -301,7 +376,32 @@ export default class GradientLayerer {
             // Use firstPos centering to avoid floating-point jitter
             const firstPos = worldPositions[0].clone()
 
+            // Add debug points at each data vertex if enabled
+            if (showDebugPoints) {
+                for (let i = 0; i < pts.length; i++) {
+                    const wp = worldPositions[i]
+                    const rgb = colorForValue(pts[i].value)
+                    const pointColor =
+                        (rgb.r << 16) | (rgb.g << 8) | rgb.b
+                    const sphereGeo = new SphereGeometry(0.15, 8, 6)
+                    const sphereMat = new MeshBasicMaterial({
+                        color: pointColor,
+                        depthTest: false,
+                    })
+                    const sphere = new Mesh(sphereGeo, sphereMat)
+                    sphere.position.set(wp.x, wp.y, wp.z)
+                    sphere.renderOrder = 999
+                    gradientGroup.add(sphere)
+                }
+            }
+
             for (let i = 0; i < pts.length - 1; i++) {
+                iterCount++
+                if (iterCount % CHECK_INTERVAL === 0) {
+                    await yieldIfNeeded()
+                    if (isStale()) return
+                }
+
                 const p0 = worldPositions[i]
                 const p1 = worldPositions[i + 1]
 
@@ -314,8 +414,10 @@ export default class GradientLayerer {
 
                 const rgb0 = colorForValue(pts[i].value)
                 const rgb1 = colorForValue(pts[i + 1].value)
-                const color0 = (rgb0.r << 16) | (rgb0.g << 8) | rgb0.b
-                const color1 = (rgb1.r << 16) | (rgb1.g << 8) | rgb1.b
+                const color0 =
+                    (rgb0.r << 16) | (rgb0.g << 8) | rgb0.b
+                const color1 =
+                    (rgb1.r << 16) | (rgb1.g << 8) | rgb1.b
 
                 // Sub-segment A: P[i] → midpoint, colored with P[i]'s value
                 const positionsA = [
@@ -333,12 +435,19 @@ export default class GradientLayerer {
                 const materialA = new LineMaterial({
                     color: color0,
                     linewidth: 0.0005 * weight,
+                    depthTest: false,
                 })
+                materialA.resolution.copy(resolution)
 
                 const meshA = new Line2(geometryA, materialA)
                 meshA.computeLineDistances()
-                meshA.position.set(firstPos.x, firstPos.y, firstPos.z)
+                meshA.position.set(
+                    firstPos.x,
+                    firstPos.y,
+                    firstPos.z
+                )
                 meshA.scale.set(1, 1, 1)
+                meshA.renderOrder = 998
 
                 // @ts-ignore
                 meshA.layerName = layerObj.name
@@ -378,13 +487,16 @@ export default class GradientLayerer {
                         isHighlighted || isActive
                             ? 0xffffff
                             : defaultColorA
-                    meshA.material = new LineMaterial({
+                    const mat = new LineMaterial({
                         color: c,
                         linewidth:
                             0.0005 *
                             weight *
                             (isHighlighted || isActive ? 2 : 1),
+                        depthTest: false,
                     })
+                    mat.resolution.copy(this.getResolution())
+                    meshA.material = mat
                 }
 
                 gradientGroup.add(meshA)
@@ -405,12 +517,19 @@ export default class GradientLayerer {
                 const materialB = new LineMaterial({
                     color: color1,
                     linewidth: 0.0005 * weight,
+                    depthTest: false,
                 })
+                materialB.resolution.copy(resolution)
 
                 const meshB = new Line2(geometryB, materialB)
                 meshB.computeLineDistances()
-                meshB.position.set(firstPos.x, firstPos.y, firstPos.z)
+                meshB.position.set(
+                    firstPos.x,
+                    firstPos.y,
+                    firstPos.z
+                )
                 meshB.scale.set(1, 1, 1)
+                meshB.renderOrder = 998
 
                 // @ts-ignore
                 meshB.layerName = layerObj.name
@@ -454,23 +573,23 @@ export default class GradientLayerer {
                         isHighlighted || isActive
                             ? 0xffffff
                             : defaultColorB
-                    meshB.material = new LineMaterial({
+                    const mat = new LineMaterial({
                         color: c,
                         linewidth:
                             0.0005 *
                             weight *
                             (isHighlighted || isActive ? 2 : 1),
+                        depthTest: false,
                     })
+                    mat.resolution.copy(this.getResolution())
+                    meshB.material = mat
                 }
 
                 gradientGroup.add(meshB)
             }
         }
 
-        if (layerObj.on == false) {
-            gradientGroup.visible = false
-        }
-
-        return gradientGroup
+        // Trigger a render update now that geometry is complete
+        this.p.p._.events._attenuate()
     }
 }
